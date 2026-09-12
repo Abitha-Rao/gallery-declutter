@@ -1,11 +1,20 @@
 """Local web app: natural-language photo search over the CLIP index."""
 import argparse
 import random
+import re
 import secrets
 import socket
 import sqlite3
 import subprocess
 from datetime import datetime
+
+UUID_RE = re.compile(r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$")
+
+
+def is_valid_uuid(value):
+    """Photos asset uuids are always this exact format; reject anything else before
+    it ever reaches a shell command or AppleScript string (defense against injection)."""
+    return isinstance(value, str) and bool(UUID_RE.match(value))
 
 import numpy as np
 import open_clip
@@ -58,7 +67,8 @@ app.secret_key = secrets.token_hex(16)
 def require_token_on_lan():
     if ACCESS_TOKEN is None:
         return  # localhost-only mode: no auth needed
-    if request.args.get("token") == ACCESS_TOKEN:
+    supplied = request.args.get("token", "")
+    if secrets.compare_digest(supplied, ACCESS_TOKEN):
         from flask import session
         session["authed"] = True
         # strip the token from the visible URL after establishing the session cookie
@@ -213,6 +223,8 @@ def search():
 
 @app.route("/thumb/<uuid>")
 def thumb(uuid):
+    if not is_valid_uuid(uuid):
+        return "invalid uuid", 400
     if _cache is None:
         load_index()
     uuids, paths, *_ = _cache
@@ -225,6 +237,8 @@ def thumb(uuid):
 
 @app.route("/reveal/<uuid>", methods=["POST"])
 def reveal(uuid):
+    if not is_valid_uuid(uuid):
+        return jsonify({"error": "invalid uuid"}), 400
     script = f'''
     tell application "Photos"
         set targetItems to (media items whose id contains "{uuid}")
@@ -300,6 +314,8 @@ def review():
     data = request.get_json()
     uuid = data["uuid"]
     decision = data["decision"]
+    if not is_valid_uuid(uuid):
+        return jsonify({"error": "invalid uuid"}), 400
     if decision not in ("keep", "delete"):
         return jsonify({"error": "invalid decision"}), 400
 
@@ -320,8 +336,8 @@ def review():
 @app.route("/review-batch", methods=["POST"])
 def review_batch():
     data = request.get_json()
-    deletes = data.get("deletes", [])
-    keeps = data.get("keeps", [])
+    deletes = [u for u in data.get("deletes", []) if is_valid_uuid(u)]
+    keeps = [u for u in data.get("keeps", []) if is_valid_uuid(u)]
 
     conn = get_db()
     now = datetime.now().isoformat()
