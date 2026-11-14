@@ -27,8 +27,8 @@ A local, private tool for searching and decluttering a large Apple Photos librar
 ## Setup
 
 ```bash
-git clone <this-repo-url>
-cd <this-repo>
+git clone https://github.com/Abitha-Rao/gallery-declutter.git
+cd gallery-declutter
 ./setup.sh
 ```
 
